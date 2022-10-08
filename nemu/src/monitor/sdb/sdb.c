@@ -38,7 +38,9 @@ static int cmd_q(char *args) {
 }
 
 static int cmd_help(char *args);
-
+static int cmd_si(char *args);
+static int cmd_info(char *args);
+static int cmd_x(char *args);
 static struct {
   const char *name;
   const char *description;
@@ -47,6 +49,9 @@ static struct {
   { "help", "Display informations about all supported commands", cmd_help },
   { "c", "Continue the execution of the program", cmd_c },
   { "q", "Exit NEMU", cmd_q },
+  {"si", "Run N steps and pause, N is 1 by default", cmd_si },
+  {"info", "Print state of registers or infomation of watchpoints", cmd_info},
+  {"x", "Scan memory from position EXPR to succeding N Bytes in hex form", cmd_x},
 
   /* TODO: Add more commands */
 
@@ -75,6 +80,44 @@ static int cmd_help(char *args) {
     printf("Unknown command '%s'\n", arg);
   }
   return 0;
+}
+
+static int cmd_si(char *args){
+    if(args==NULL){
+        return 1;
+    }
+    int steps = atoi(args);
+    cpu_exec(steps);
+    return 0;  
+}
+
+static int cmd_info(char *args){
+    if(!strcmp(args, "r")){
+        isa_reg_display();
+    }                    
+    else if(!strcmp(args, "w")){
+    
+    }
+    else{
+        printf("No such thing to show info\n");
+   }
+    return 0;
+}
+
+static int cmd_x(char *args){
+
+    if(args==NULL){
+        printf("Nothing to scan!\n");
+        return 0;
+    }
+    char *N = strtok(args, " ");
+    char *expr = args+strlen(N)+1;
+    word_t *val = paddr_read(expr, atoi(N));
+    printf("%s value is %s\n", expr, expr);
+
+    return 0;
+
+    
 }
 
 void sdb_set_batch_mode() {
