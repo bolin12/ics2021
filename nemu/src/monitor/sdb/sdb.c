@@ -6,6 +6,13 @@
 
 static int is_batch_mode = false;
 
+static int cmd_help(char *args);
+static int cmd_si(char *args);
+static int cmd_info(char *args);
+static int cmd_x(char *args);
+
+word_t paddr_read(paddr_t addr, int len);
+void paddr_write(paddr_t addr, int len, word_t data);
 void init_regex();
 void init_wp_pool();
 
@@ -37,10 +44,7 @@ static int cmd_q(char *args) {
   return -1;
 }
 
-static int cmd_help(char *args);
-static int cmd_si(char *args);
-static int cmd_info(char *args);
-static int cmd_x(char *args);
+
 static struct {
   const char *name;
   const char *description;
@@ -110,10 +114,21 @@ static int cmd_x(char *args){
         printf("Nothing to scan!\n");
         return 0;
     }
-    char *N = strtok(args, " ");
-    char *expr = args+strlen(N)+1;
-    word_t *val = paddr_read(expr, atoi(N));
-    printf("%s value is %s\n", expr, expr);
+    char *N_ = strtok(args, " ");
+    char *expr = args+strlen(N_)+1;
+    int N = atoi(N_);
+    paddr_t addr =  strtol(expr, NULL, 0);      
+    printf("%s succeeding %d values are: \n", expr, N);    
+    for(int i=0;i<N;i++){
+      
+      word_t val = paddr_read(addr+i*4, 4);
+      printf("%08x ", val);
+      if((i+1)%10==0){
+        printf("\n");
+      }
+    }
+    printf("\n");
+    
 
     return 0;
 
