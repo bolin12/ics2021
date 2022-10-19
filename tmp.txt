@@ -1,0 +1,443 @@
+SRCS := start.S main.c
+bootblock.o: $(SRCS) Makefile
+	@echo + CC $(SRCS)
+	@$(CROSS_COMPILE)gcc -static -m32 -fno-pic -Os -nostdlib -Ttext 0x7c00 -I$(AM_HOME)/am/src -o bootblock.o $(SRCS)
+	@python3 genboot.py bootblock.o
+
+clean:
+	rm -rf *.o
+NAME     := am
+SRCS      = $(addprefix src/, $(AM_SRCS))
+INC_PATH += $(AM_HOME)/am/src
+
+include $(AM_HOME)/Makefile
+NAME = klib
+SRCS = $(shell find src/ -name "*.c")
+include $(AM_HOME)/Makefile
+# Makefile for AbstractMachine Kernels and Libraries
+
+### *Get a more readable version of this Makefile* by `make html` (requires python-markdown)
+html:
+	cat Makefile | sed 's/^\([^#]\)/    \1/g' | markdown_py > Makefile.html
+.PHONY: html
+
+## 1. Basic Setup and Checks
+
+### Default to create a bare-metal kernel image
+ifeq ($(MAKECMDGOALS),)
+  MAKECMDGOALS  = image
+  .DEFAULT_GOAL = image
+endif
+
+### Override checks when `make clean/clean-all/html`
+ifeq ($(findstring $(MAKECMDGOALS),clean|clean-all|html),)
+
+### Print build info message
+$(info # Building $(NAME)-$(MAKECMDGOALS) [$(ARCH)])
+
+### Check: environment variable `$AM_HOME` looks sane
+ifeq ($(wildcard $(AM_HOME)/am/include/am.h),)
+  $(error $$AM_HOME must be an AbstractMachine repo)
+endif
+
+### Check: environment variable `$ARCH` must be in the supported list
+ARCHS = $(basename $(notdir $(shell ls $(AM_HOME)/scripts/*.mk)))
+ifeq ($(filter $(ARCHS), $(ARCH)), )
+  $(error Expected $$ARCH in {$(ARCHS)}, Got "$(ARCH)")
+endif
+
+### Extract instruction set architecture (`ISA`) and platform from `$ARCH`. Example: `ARCH=x86_64-qemu -> ISA=x86_64; PLATFORM=qemu`
+ARCH_SPLIT = $(subst -, ,$(ARCH))
+ISA        = $(word 1,$(ARCH_SPLIT))
+PLATFORM   = $(word 2,$(ARCH_SPLIT))
+
+### Check if there is something to build
+ifeq ($(flavor SRCS), undefined)
+  $(error Nothing to build)
+endif
+
+### Checks end here
+endif
+
+## 2. General Compilation Targets
+
+### Create the destination directory (`build/$ARCH`)
+WORK_DIR  = $(shell pwd)
+DST_DIR   = $(WORK_DIR)/build/$(ARCH)
+$(shell mkdir -p $(DST_DIR))
+
+### Compilation targets (a binary image or archive)
+IMAGE_REL = build/$(NAME)-$(ARCH)
+IMAGE     = $(abspath $(IMAGE_REL))
+ARCHIVE   = $(WORK_DIR)/build/$(NAME)-$(ARCH).a
+
+### Collect the files to be linked: object files (`.o`) and libraries (`.a`)
+OBJS      = $(addprefix $(DST_DIR)/, $(addsuffix .o, $(basename $(SRCS))))
+LIBS     := $(sort $(LIBS) am klib) # lazy evaluation ("=") causes infinite recursions
+LINKAGE   = $(OBJS) \
+  $(addsuffix -$(ARCH).a, $(join \
+    $(addsuffix /build/, $(addprefix $(AM_HOME)/, $(LIBS))), \
+    $(LIBS) ))
+
+## 3. General Compilation Flags
+
+### (Cross) compilers, e.g., mips-linux-gnu-g++
+AS        = $(CROSS_COMPILE)gcc
+CC        = $(CROSS_COMPILE)gcc
+CXX       = $(CROSS_COMPILE)g++
+LD        = $(CROSS_COMPILE)ld
+OBJDUMP   = $(CROSS_COMPILE)objdump
+OBJCOPY   = $(CROSS_COMPILE)objcopy
+READELF   = $(CROSS_COMPILE)readelf
+
+### Compilation flags
+INC_PATH += $(WORK_DIR)/include $(addsuffix /include/, $(addprefix $(AM_HOME)/, $(LIBS)))
+INCFLAGS += $(addprefix -I, $(INC_PATH))
+
+CFLAGS   += -O2 -MMD -Wall -Werror $(INCFLAGS) \
+            -D__ISA__=\"$(ISA)\" -D__ISA_$(shell echo $(ISA) | tr a-z A-Z)__ \
+            -D__ARCH__=$(ARCH) -D__ARCH_$(shell echo $(ARCH) | tr a-z A-Z | tr - _) \
+            -D__PLATFORM__=$(PLATFORM) -D__PLATFORM_$(shell echo $(PLATFORM) | tr a-z A-Z | tr - _) \
+            -DARCH_H=\"arch/$(ARCH).h\" \
+            -fno-asynchronous-unwind-tables -fno-builtin -fno-stack-protector \
+            -Wno-main -U_FORTIFY_SOURCE
+CXXFLAGS +=  $(CFLAGS) -ffreestanding -fno-rtti -fno-exceptions
+ASFLAGS  += -MMD $(INCFLAGS)
+
+## 4. Arch-Specific Configurations
+
+### Paste in arch-specific configurations (e.g., from `scripts/x86_64-qemu.mk`)
+-include $(AM_HOME)/scripts/$(ARCH).mk
+
+### Fall back to native gcc/binutils if there is no cross compiler
+ifeq ($(wildcard $(shell which $(CC))),)
+  $(info #  $(CC) not found; fall back to default gcc and binutils)
+  CROSS_COMPILE :=
+endif
+
+## 5. Compilation Rules
+
+### Rule (compile): a single `.c` -> `.o` (gcc)
+$(DST_DIR)/%.o: %.c
+	@mkdir -p $(dir $@) && echo + CC $<
+	@$(CC) -std=gnu11 $(CFLAGS) -c -o $@ $(realpath $<)
+
+### Rule (compile): a single `.cc` -> `.o` (g++)
+$(DST_DIR)/%.o: %.cc
+	@mkdir -p $(dir $@) && echo + CXX $<
+	@$(CXX) -std=c++17 $(CXXFLAGS) -c -o $@ $(realpath $<)
+
+### Rule (compile): a single `.cpp` -> `.o` (g++)
+$(DST_DIR)/%.o: %.cpp
+	@mkdir -p $(dir $@) && echo + CXX $<
+	@$(CXX) -std=c++17 $(CXXFLAGS) -c -o $@ $(realpath $<)
+
+### Rule (compile): a single `.S` -> `.o` (gcc, which preprocesses and calls as)
+$(DST_DIR)/%.o: %.S
+	@mkdir -p $(dir $@) && echo + AS $<
+	@$(AS) $(ASFLAGS) -c -o $@ $(realpath $<)
+
+### Rule (recursive make): build a dependent library (am, klib, ...)
+$(LIBS): %:
+	@$(MAKE) -s -C $(AM_HOME)/$* archive
+
+### Rule (link): objects (`*.o`) and libraries (`*.a`) -> `IMAGE.elf`, the final ELF binary to be packed into image (ld)
+$(IMAGE).elf: $(OBJS) am $(LIBS)
+	@echo + LD "->" $(IMAGE_REL).elf
+	@$(LD) $(LDFLAGS) -o $(IMAGE).elf --start-group $(LINKAGE) --end-group
+
+### Rule (archive): objects (`*.o`) -> `ARCHIVE.a` (ar)
+$(ARCHIVE): $(OBJS)
+	@echo + AR "->" $(shell realpath $@ --relative-to .)
+	@ar rcs $(ARCHIVE) $(OBJS)
+
+### Rule (`#include` dependencies): paste in `.d` files generated by gcc on `-MMD`
+-include $(addprefix $(DST_DIR)/, $(addsuffix .d, $(basename $(SRCS))))
+
+## 6. Miscellaneous
+
+### Build order control
+image: image-dep
+archive: $(ARCHIVE)
+image-dep: $(OBJS) am $(LIBS)
+	@echo \# Creating image [$(ARCH)]
+.PHONY: image image-dep archive run $(LIBS)
+
+### Clean a single project (remove `build/`)
+clean:
+	rm -rf Makefile.html $(WORK_DIR)/build/
+.PHONY: clean
+
+### Clean all sub-projects within depth 2 (and ignore errors)
+CLEAN_ALL = $(dir $(shell find . -mindepth 2 -name Makefile))
+clean-all: $(CLEAN_ALL) clean
+$(CLEAN_ALL):
+	-@$(MAKE) -s -C $@ clean
+.PHONY: clean-all $(CLEAN_ALL)
+NAME = fceux
+
+ROM_PATH  = ./nes
+ROMS      = $(shell ls $(ROM_PATH)/rom/*.nes)
+ROM_SRC   = $(addprefix $(ROM_PATH)/gen/, $(addsuffix .c, $(notdir $(basename $(ROMS)))))
+FCEUX_SRC = $(shell find -L src/ -name "*.c" -o -name "*.cpp")
+
+INC_PATH  = $(ROM_PATH)/gen/
+SRCS      = $(FCEUX_SRC) $(ROM_SRC)
+CFLAGS    = -DPSS_STYLE=1 -DFRAMESKIP -D__NO_FILE_SYSTEM__
+
+include $(AM_HOME)/Makefile
+
+$(FCEUX_SRC): $(ROM_SRC)
+$(ROM_SRC): rom
+.PHONY: rom
+rom:
+	@-cd $(ROM_PATH) && python3 build-roms.py
+
+clean: myclean
+
+myclean:
+	-rm -rf ./nes/gen
+include nemu/scripts/git.mk
+
+default:
+	@echo "Please run 'make' under any subprojects to compile."
+
+submit:
+	git gc
+
+.PHONY: default submit
+# Sanity check
+ifeq ($(wildcard $(NEMU_HOME)/src/nemu-main.c),)
+  $(error NEMU_HOME=$(NEMU_HOME) is not a NEMU repo)
+endif
+
+# Include variables and rules generated by menuconfig
+-include $(NEMU_HOME)/include/config/auto.conf
+-include $(NEMU_HOME)/include/config/auto.conf.cmd
+
+remove_quote = $(patsubst "%",%,$(1))
+
+# Extract variabls from menuconfig
+GUEST_ISA ?= $(call remove_quote,$(CONFIG_ISA))
+ENGINE ?= $(call remove_quote,$(CONFIG_ENGINE))
+NAME    = $(GUEST_ISA)-nemu-$(ENGINE)
+
+# Include all filelist.mk to merge file lists
+FILELIST_MK = $(shell find ./src -name "filelist.mk")
+include $(FILELIST_MK)
+
+# Filter out directories and files in blacklist to obtain the final set of source files
+DIRS-BLACKLIST-y += $(DIRS-BLACKLIST)
+SRCS-BLACKLIST-y += $(SRCS-BLACKLIST) $(shell find $(DIRS-BLACKLIST-y) -name "*.c")
+SRCS-y += $(shell find $(DIRS-y) -name "*.c")
+SRCS = $(filter-out $(SRCS-BLACKLIST-y),$(SRCS-y))
+
+# Extract compiler and options from menuconfig
+CC = $(call remove_quote,$(CONFIG_CC))
+CFLAGS_BUILD += $(call remove_quote,$(CONFIG_CC_OPT))
+CFLAGS_BUILD += $(if $(CONFIG_CC_LTO),-flto,)
+CFLAGS_BUILD += $(if $(CONFIG_CC_DEBUG),-ggdb3,)
+CFLAGS_BUILD += $(if $(CONFIG_CC_ASAN),-fsanitize=address,)
+CFLAGS_TRACE += -DITRACE_COND=$(if $(CONFIG_ITRACE_COND),$(call remove_quote,$(CONFIG_ITRACE_COND)),true)
+CFLAGS  += $(CFLAGS_BUILD) $(CFLAGS_TRACE) -D__GUEST_ISA__=$(GUEST_ISA)
+LDFLAGS += $(CFLAGS_BUILD)
+
+# Include rules for menuconfig
+include $(NEMU_HOME)/scripts/config.mk
+
+ifdef CONFIG_TARGET_AM
+include $(AM_HOME)/Makefile
+LINKAGE += $(ARCHIVES)
+else
+# Include rules to build NEMU
+include $(NEMU_HOME)/scripts/native.mk
+endif
+NAME  = $(GUEST_ISA)-qemu
+SRCS  = $(shell find src/ -name "*.c")
+
+SHARE = 1
+CFLAGS += -DNEMU_HOME=\"$(NEMU_HOME)\" -DCONFIG_ISA_$(GUEST_ISA)
+INC_PATH += $(NEMU_HOME)/include
+
+include $(NEMU_HOME)/scripts/build.mk
+REPO_PATH = repo
+ifeq ($(wildcard repo/spike_main),)
+  $(shell git clone --depth=1 https://github.com/NJU-ProjectN/riscv-isa-sim $(REPO_PATH))
+endif
+
+REPO_BUILD_PATH = $(REPO_PATH)/build
+REPO_MAKEFILE = $(REPO_BUILD_PATH)/Makefile
+$(REPO_MAKEFILE):
+	@mkdir -p $(@D)
+	cd $(@D) && $(abspath $(REPO_PATH))/configure
+	sed -i -e 's/-g -O2/-O2/' $@
+
+SPIKE = $(REPO_BUILD_PATH)/spike
+$(SPIKE): $(REPO_MAKEFILE)
+	$(MAKE) -C $(^D)
+
+BUILD_DIR = ./build
+$(shell mkdir -p $(BUILD_DIR))
+
+inc_dependencies = fesvr riscv disasm customext fdt softfloat spike_main spike_dasm build
+INC_PATH  = -I$(REPO_PATH) $(addprefix -I$(REPO_PATH)/, $(inc_dependencies))
+INC_PATH += -I$(NEMU_HOME)/include
+lib_dependencies = libspike_main.a libriscv.a libdisasm.a libsoftfloat.a libfesvr.a libfdt.a
+INC_LIBS  = $(addprefix $(REPO_PATH)/build/, $(lib_dependencies))
+
+NAME = $(GUEST_ISA)-spike-so
+BINARY = $(BUILD_DIR)/$(NAME)
+SRCS = difftest.cc
+
+$(BINARY): $(SPIKE) $(SRCS)
+	g++ -O2 -shared -fPIC $(INC_PATH) $(SRCS) $(INC_LIBS) -o $@
+
+clean:
+	rm -rf $(BUILD_DIR)
+
+all: $(BINARY)
+.DEFAULT_GOAL = all
+
+.PHONY: all clean $(SPIKE)
+NAME = fixdep
+SRCS = fixdep.c
+include $(NEMU_HOME)/scripts/build.mk
+NAME = gen-expr
+SRCS = gen-expr.c
+include $(NEMU_HOME)/scripts/build.mk
+NAME  = x86-kvm
+SRCS  = $(shell find src/ -name "*.c")
+
+SHARE = 1
+INC_PATH += $(NEMU_HOME)/include $(NEMU_HOME)/src/isa/x86/include
+GUEST_ISA = x86
+
+include $(NEMU_HOME)/scripts/build.mk
+NAME = conf
+obj := build
+SRCS += confdata.c expr.c preprocess.c symbol.c util.c
+SRCS += $(obj)/lexer.lex.c $(obj)/parser.tab.c
+CC = gcc
+CFLAGS += -DYYDEBUG
+INC_PATH += .
+
+ifeq ($(NAME),conf)
+SRCS += conf.c
+else ifeq ($(NAME),mconf)
+SRCS += mconf.c $(shell find lxdialog/ -name "*.c")
+LIBS += -lncurses -ltinfo
+else
+$(error bad target=$(NAME))
+endif
+
+include $(NEMU_HOME)/scripts/build.mk
+
+$(obj)/lexer.lex.o: $(obj)/parser.tab.h
+$(obj)/lexer.lex.c: lexer.l $(obj)/parser.tab.h
+	@echo + LEX $@
+	@flex -o $@ $<
+
+$(obj)/parser.tab.c $(obj)/parser.tab.h: parser.y
+	@echo + YACC $@
+	@bison -v $< --defines=$(obj)/parser.tab.h -o $(obj)/parser.tab.c
+
+conf:
+	@$(MAKE) -s
+
+mconf:
+	@$(MAKE) -s NAME=mconf
+
+.PHONY: conf mconf
+NAME = slider
+SRCS = main.c image.S
+include $(AM_HOME)/Makefile
+NAME = litenes
+SRCS = $(shell find src/ -name "*.c")
+include $(AM_HOME)/Makefile
+NAME = hello
+SRCS = hello.c
+include $(AM_HOME)/Makefile
+ARCH_SPLIT = $(subst -, ,$(ARCH))
+ISA        = $(word 1,$(ARCH_SPLIT))
+PLATFORM   = $(word 2,$(ARCH_SPLIT))
+
+ifneq ($(PLATFORM), nemu)
+$(error Only support with NEMU)
+endif
+
+TMPDEFCONFIG = tmp_defconfig
+TMPDEFCONFIG_FILE = $(NEMU_HOME)/configs/$(TMPDEFCONFIG)
+
+all:
+	$(MAKE) save_config
+	$(MAKE) build_am
+	$(MAKE) restore_config
+	$(MAKE) -C $(NEMU_HOME) run IMG=$(NEMU_HOME)/build/$(ISA)-nemu-interpreter-$(ARCH).bin
+
+save_config:
+	$(MAKE) -C $(NEMU_HOME) savedefconfig
+	mv $(NEMU_HOME)/configs/defconfig $(TMPDEFCONFIG_FILE)
+
+build_am:
+	$(MAKE) -C $(NEMU_HOME) $(ISA)-am_defconfig
+	$(MAKE) -C $(NEMU_HOME) ARCH=$(ARCH) mainargs=$(mainargs) || \
+		($(MAKE) restore_config; false)
+
+restore_config:
+	$(MAKE) -C $(NEMU_HOME) ARCH=$(ARCH) $(TMPDEFCONFIG)
+	rm $(TMPDEFCONFIG_FILE)
+
+.PHONY: all save_config build_am restore_config
+NAME = thread-os
+SRCS = thread-os.c
+include $(AM_HOME)/Makefile
+NAME = typing-game
+SRCS = game.c font.c
+include $(AM_HOME)/Makefile
+NAME = dhrystone
+SRCS = dry.c
+include $(AM_HOME)/Makefile
+NAME = microbench
+SRCS = $(shell find src/ -name "*.c" -o -name "*.cc")
+include $(AM_HOME)/Makefile
+NAME = coremark
+SRCS = $(shell find src/ -name "*.c")
+include $(AM_HOME)/Makefile
+NAME = amtest
+SRCS = $(shell find src/ -name "*.[cS]")
+include $(AM_HOME)/Makefile
+.PHONY: all run gdb clean latest $(ALL)
+
+RESULT = .result
+$(shell > $(RESULT))
+
+COLOR_RED   = \033[1;31m
+COLOR_GREEN = \033[1;32m
+COLOR_NONE  = \033[0m
+
+ALL = $(basename $(notdir $(shell find tests/. -name "*.c")))
+
+all: $(addprefix Makefile., $(ALL))
+	@echo "" $(ALL)
+
+$(ALL): %: Makefile.%
+
+Makefile.%: tests/%.c latest
+	@/bin/echo -e "NAME = $*\nSRCS = $<\nLIBS += klib\ninclude $${AM_HOME}/Makefile" > $@
+	@if make -s -f $@ ARCH=$(ARCH) $(MAKECMDGOALS); then \
+		printf "[%14s] $(COLOR_GREEN)PASS!$(COLOR_NONE)\n" $* >> $(RESULT); \
+	else \
+		printf "[%14s] $(COLOR_RED)FAIL!$(COLOR_NONE)\n" $* >> $(RESULT); \
+	fi
+	-@rm -f Makefile.$*
+
+run: all
+	@cat $(RESULT)
+	@rm $(RESULT)
+
+gdb: all
+
+clean:
+	rm -rf Makefile.* build/
+
+latest:
