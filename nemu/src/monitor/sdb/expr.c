@@ -96,8 +96,6 @@ static bool make_token(char *e)
     /* Try all rules one by one. */
     for (i = 0; i < NR_REGEX; i++)
     {
-      Log("args to make token: %s\n", e + position);
-      Log("and this to be match is number:%d\n", i);
       if (regexec(&re[i], e + position, 1, &pmatch, 0) == 0 && pmatch.rm_so == 0)
       {
         char *substr_start = e + position;
@@ -146,7 +144,9 @@ static bool make_token(char *e)
           break;
         }
         strncpy(tokens[nr_token].str, substr_start, substr_len);
+        tokens[nr_token].str[substr_len] = '\0'; //set end str flag
         nr_token++;
+        break; // match ended no need for loop else wrong.
       }
     }
 
@@ -175,6 +175,7 @@ word_t expr(char *e, bool *success)
   if (check_legalparen(0, nr_token - 1) == false)
   {
     *success = false;
+    Log("Not legal parentheses!");
     return 0;
   }
 
@@ -183,7 +184,6 @@ word_t expr(char *e, bool *success)
   {
     *success = false;
   }
-  *success = true;
   return value;
 }
 
@@ -196,10 +196,16 @@ static uint32_t eval(int p, int q)
   }
   if (p == q)
   {
-    if (!isdigit(tokens[p].str))
+    Log("Current str is :%s", tokens[p].str);
+    for (int i = 0; tokens[p].str[i]!='\0'; i++) //judge if it is a number one by one
     {
-      EXPR_FLAG = false;
-      return 0;
+
+      if (!isdigit(tokens[p].str[i]))
+      {
+        Log("Not a digit of char%c!", tokens[p].str[i]);
+        EXPR_FLAG = false;
+        return 0;
+      }
     }
     return atoi(tokens[p].str);
   }
@@ -212,12 +218,14 @@ static uint32_t eval(int p, int q)
     int op_pos = found_main_op_token(p, q);
     if (op_pos == -1)
     {
+      Log("No legal operator!%d", p);
       EXPR_FLAG = false;
       return 0;
     }
 
     word_t val1 = eval(p, op_pos - 1);
     word_t val2 = eval(op_pos + 1, q);
+    Log("val1 and val2 are:%d,%d", val1,val2);
     switch (tokens[op_pos].type)
     {
     case TK_ADD:
@@ -227,6 +235,11 @@ static uint32_t eval(int p, int q)
     case TK_MUL:
       return val1 * val2;
     case TK_DIV:
+      if( val2 == 0){
+        Log("Div zero error!");
+        EXPR_FLAG = false;
+        return 0;
+      }
       return val1 / val2;
     default:
       Assert(0, "????\n");

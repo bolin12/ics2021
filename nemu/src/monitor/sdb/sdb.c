@@ -161,7 +161,7 @@ static int cmd_p(char *args)
     return 0;
   }
   bool *success=malloc(sizeof(bool));
-  
+  *success = true;
 
   word_t val = expr(args, success);
   if (*success == false)
