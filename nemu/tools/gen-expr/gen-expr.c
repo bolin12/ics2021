@@ -11,7 +11,8 @@ static char code_buf[65536 + 128] = {}; // a little larger than `buf`
 static char *code_format =
 "#include <stdio.h>\n"
 "int main() { "
-"  unsigned result = %s; "
+"  unsigned result = 0u; "
+"  result = result + %s; "
 "  printf(\"%%u\", result); "
 "  return 0; "
 "}";
@@ -25,16 +26,13 @@ static void gen(char str){
 
 }
 
-// to cast to unsigned int
-// static void gen_u(){
-//   *(buf+buf_offset) = 'u'; buf_offset++;
-// }
+
 
 static void gen_num(){
   if(rand()%6==0)gen(' ');
   if(rand()%50==0){
     gen('0');
-    // gen_u();
+    gen('u');
     return;
   }
   int len = rand()%3+2;
@@ -42,7 +40,7 @@ static void gen_num(){
   for(int i=2;i<=len;i++){
     gen((char)(rand()%10+'0'));
   }
-  // gen_u();
+  gen('u');
   if(rand()%6==0)gen(' ');
 }
 
@@ -82,7 +80,7 @@ int main(int argc, char *argv[]) {
   int i;
   for (i = 0; i < loop; i ++) {
     buf_offset=0;
-    op_limit = 20;
+    op_limit = 40;
     gen_rand_expr();
     buf[buf_offset]='\0';
     sprintf(code_buf, code_format, buf);

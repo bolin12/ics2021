@@ -10,6 +10,7 @@
 enum
 {
   TK_NOTYPE,
+  TK_U,// to keep unsigned calculation
   TK_EQ,
   TK_ADD,
   TK_SUB,
@@ -34,6 +35,7 @@ static struct rule
      */
 
     {" +", TK_NOTYPE}, // spaces
+    {"u", TK_U},       // unsigned flag
     {"\\+", TK_ADD},   // add
     {"-", TK_SUB},     // sub
     {"==", TK_EQ},     // equal
@@ -72,8 +74,8 @@ typedef struct token
   int type;
   char str[32];
 } Token;
-
-static Token tokens[32] __attribute__((used)) = {};
+// larger for test
+static Token tokens[512] __attribute__((used)) = {};
 static int nr_token __attribute__((used)) = 0;
 bool EXPR_FLAG = true;
 static uint32_t eval(int p, int q);
@@ -84,7 +86,6 @@ static int found_main_op_token(int p, int q);
 
 static bool make_token(char *e)
 {
-
   int position = 0;
   int i;
   regmatch_t pmatch;
@@ -96,16 +97,16 @@ static bool make_token(char *e)
     /* Try all rules one by one. */
     for (i = 0; i < NR_REGEX; i++)
     {
+      // printf("here loop in?\n");
       if (regexec(&re[i], e + position, 1, &pmatch, 0) == 0 && pmatch.rm_so == 0)
       {
         char *substr_start = e + position;
         int substr_len = pmatch.rm_eo;
 
-        Log("match rules[%d] = \"%s\" at position %d with len %d: %.*s",
-            i, rules[i].regex, position, substr_len, substr_len, substr_start);
+        // Log("match rules[%d] = \"%s\" at position %d with len %d: %.*s",
+        //     i, rules[i].regex, position, substr_len, substr_len, substr_start);
 
         position += substr_len;
-
         /* TODO: Now a new token is recognized with rules[i]. Add codes
          * to record the token in the array `tokens'. For certain types
          * of tokens, some extra actions should be performed.
@@ -113,8 +114,10 @@ static bool make_token(char *e)
         switch (rules[i].token_type)
         {
         case TK_NOTYPE:
-          // tokens[nr_token].type = TK_NOTYPE; no need to record TK_NOTYPE
-          continue;
+          goto NEXT; // just jump out of this
+                     //  tokens[nr_token].type = TK_NOTYPE; no need to record TK_NOTYPE
+        case TK_U:  // to eliminate fool generator to generate some signed calcculation.
+          goto NEXT;
         case TK_ADD:
           tokens[nr_token].type = TK_ADD;
           break;
@@ -144,8 +147,9 @@ static bool make_token(char *e)
           break;
         }
         strncpy(tokens[nr_token].str, substr_start, substr_len);
-        tokens[nr_token].str[substr_len] = '\0'; //set end str flag
+        tokens[nr_token].str[substr_len] = '\0'; // set end str flag
         nr_token++;
+      NEXT:
         break; // match ended no need for loop else wrong.
       }
     }
@@ -162,6 +166,7 @@ static bool make_token(char *e)
 
 word_t expr(char *e, bool *success)
 {
+
   if (!make_token(e))
   {
     *success = false;
@@ -196,8 +201,7 @@ static uint32_t eval(int p, int q)
   }
   if (p == q)
   {
-    Log("Current str is :%s", tokens[p].str);
-    for (int i = 0; tokens[p].str[i]!='\0'; i++) //judge if it is a number one by one
+    for (int i = 0; tokens[p].str[i] != '\0'; i++) // judge if it is a number one by one
     {
 
       if (!isdigit(tokens[p].str[i]))
@@ -218,34 +222,43 @@ static uint32_t eval(int p, int q)
     int op_pos = found_main_op_token(p, q);
     if (op_pos == -1)
     {
-      Log("No legal operator!%d", p);
+      Log("No legal operator from p%d:%s to q%d:%s!", p, tokens[p].str, q, tokens[q].str);
       EXPR_FLAG = false;
       return 0;
     }
 
     word_t val1 = eval(p, op_pos - 1);
     word_t val2 = eval(op_pos + 1, q);
-    Log("val1 and val2 are:%d,%d", val1,val2);
+    // Log("val1 and val2 are:%u,%u", val1,val2);
+    word_t ret_val=0;
     switch (tokens[op_pos].type)
     {
     case TK_ADD:
-      return val1 + val2;
+      ret_val =  val1 + val2;
+      break;
     case TK_SUB:
-      return val1 - val2;
+      ret_val =  val1 - val2;
+      break;
     case TK_MUL:
-      return val1 * val2;
+      ret_val =  val1 * val2;
+      break;
     case TK_DIV:
-      if( val2 == 0){
+      if (val2 == 0)
+      {
         Log("Div zero error!");
         EXPR_FLAG = false;
         return 0;
       }
-      return val1 / val2;
+      ret_val =  val1 / val2;
+      break;
     default:
       Assert(0, "????\n");
     }
+
+    
+    return ret_val;
   }
-  return 0;
+  
 }
 
 static int found_main_op_token(int p, int q)
@@ -303,7 +316,27 @@ static int found_main_op_token(int p, int q)
 
 static bool check_parentheses(int p, int q)
 {
-  return !strcmp(tokens[p].str, "(") && !strcmp(tokens[q].str, ")");
+  if (!(!strcmp(tokens[p].str, "(") && !strcmp(tokens[q].str, ")")))
+  {
+    return false;
+  }
+  int le_count = 1;
+  for (int i = p + 1; i <= q; i++)
+  {
+    if (!strcmp(tokens[i].str, "("))
+    {
+      le_count++;
+    }
+    if (!strcmp(tokens[i].str, ")"))
+    {
+      le_count--;
+      if (le_count == 0 && i < q)
+      {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 static bool check_legalparen(int p, int q)
