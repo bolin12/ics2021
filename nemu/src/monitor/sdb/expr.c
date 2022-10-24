@@ -7,6 +7,8 @@
 #include <ctype.h>
 #include <stdbool.h>
 
+
+
 enum
 {
   TK_NOTYPE = 1,
@@ -48,7 +50,7 @@ static struct rule
     {"&&", TK_AND},
     {"\\*", TK_MUL}, // mul
     {"/", TK_DIV},
-    {"^(0x)[0-9a-fA_F]* | ^\\$[0-9a-zA-Z]*", TK_NUM}, // advanced match than devimal
+    {"(0x)?[0-9a-fA_F]*|^\\$[0-9a-zA-Z]*", TK_NUM}, // advanced match than devimal
     {"\\(", TK_LBRAKETS},
     {"\\)", TK_RBRAKETS}};
 
@@ -94,6 +96,7 @@ static int nr_token __attribute__((used)) = 0;
 bool EXPR_FLAG = true;
 static uint32_t eval(int p, int q);
 
+word_t paddr_read(paddr_t addr, int len);
 static bool check_legalparen(int p, int q);
 static bool check_parentheses(int p, int q);
 static int found_main_op_token(int p, int q);
@@ -295,9 +298,7 @@ static uint32_t eval(int p, int q)
     {
 
       word_t to_execute = eval(op_pos + 1, q);
-      char *tmp_addr = malloc(32);
-      sprintf(tmp_addr, "0x%08x\0", to_execute);
-      word_t val = paddr_read(tmp_addr, 4);
+      word_t val = paddr_read(to_execute, 4);
       return val;
     }
     word_t val1 = eval(p, op_pos - 1);

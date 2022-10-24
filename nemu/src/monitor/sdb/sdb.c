@@ -13,9 +13,6 @@ static int cmd_x(char *args);
 static int cmd_p(char *args);
 static int cmd_w(char *args);
 static int cmd_d(char *args);
-
-word_t paddr_read(paddr_t addr, int len);
-void paddr_write(paddr_t addr, int len, word_t data);
 void init_regex();
 void init_wp_pool();
 
@@ -166,13 +163,8 @@ static int cmd_p(char *args)
   }
   bool *success = malloc(sizeof(bool));
   *success = true;
-
   word_t val = expr(args, success);
-  if (*success == false)
-  {
-    printf("Illegal expr!\n");
-    return 0;
-  }
+  Assert(*success==true, "Illegal expr!");
   printf("value is: %d\n", val);
   return 0;
 }
@@ -184,7 +176,16 @@ static int cmd_w(char *args)
     printf("Nothing to watch!\n");
     return 0;
   }
-  // new_wp();
+
+  bool *success = malloc(sizeof(bool));
+  *success = true;
+  word_t val = expr(args, success);
+  Assert(*success==true, "cmd_w, Illegal expr!");
+  WP* w =  new_wp();
+  w->expr = malloc(32);
+  // printf("value is: %d\n", val);
+  printf("watchpoint %d at %08x\n", w->NO, val);
+  sprintf(w->expr, "0x%08x%c",val, '\0');
   return 0;
 }
 
