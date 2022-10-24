@@ -11,6 +11,8 @@ static int cmd_si(char *args);
 static int cmd_info(char *args);
 static int cmd_x(char *args);
 static int cmd_p(char *args);
+static int cmd_w(char *args);
+static int cmd_d(char *args);
 
 word_t paddr_read(paddr_t addr, int len);
 void paddr_write(paddr_t addr, int len, word_t data);
@@ -61,7 +63,9 @@ static struct
     {"si", "Run N steps and pause, N is 1 by default", cmd_si},
     {"info", "Print state of registers or infomation of watchpoints", cmd_info},
     {"x", "Scan memory from position EXPR to succeding N Bytes in hex form", cmd_x},
-    {"p", "Calculate value of EXPR", cmd_p}
+    {"p", "Calculate value of EXPR", cmd_p},
+    {"w", "Set watchpoint to EXPR", cmd_w},
+    {"d", "Delete watchpoint of number N", cmd_d},
 
     /* TODO: Add more commands */
 
@@ -160,7 +164,7 @@ static int cmd_p(char *args)
     printf("Nothing to scan!\n");
     return 0;
   }
-  bool *success=malloc(sizeof(bool));
+  bool *success = malloc(sizeof(bool));
   *success = true;
 
   word_t val = expr(args, success);
@@ -173,6 +177,26 @@ static int cmd_p(char *args)
   return 0;
 }
 
+static int cmd_w(char *args)
+{
+  if (args == NULL)
+  {
+    printf("Nothing to watch!\n");
+    return 0;
+  }
+  // new_wp();
+  return 0;
+}
+
+static int cmd_d(char *args)
+{
+  if (args == NULL)
+  {
+    printf("Nothing to delete!\n");
+    return 0;
+  }
+  return 0;
+}
 void sdb_set_batch_mode()
 {
   is_batch_mode = true;

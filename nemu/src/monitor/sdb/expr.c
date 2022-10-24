@@ -9,14 +9,19 @@
 
 enum
 {
-  TK_NOTYPE,
-  TK_U,// to keep unsigned calculation
+  TK_NOTYPE = 1,
+  TK_U, // to keep unsigned calculation
   TK_EQ,
+  TK_NOTEQ,
+  TK_AND,
   TK_ADD,
   TK_SUB,
   TK_MUL,
   TK_DIV,
+  // TK_DECIMAL_NUM,
   TK_NUM,
+  TK_REGNAME,
+  TK_DEPOINTER,
   TK_LBRAKETS,
   TK_RBRAKETS,
 
@@ -39,12 +44,21 @@ static struct rule
     {"\\+", TK_ADD},   // add
     {"-", TK_SUB},     // sub
     {"==", TK_EQ},     // equal
-    {"\\*", TK_MUL},   // mul
+    {"!=", TK_NOTEQ},  // not equal
+    {"&&", TK_AND},
+    {"\\*", TK_MUL}, // mul
     {"/", TK_DIV},
-    {"[1-9][0-9]*|0", TK_NUM},
+    {"^(0x)[0-9a-fA_F]* | ^\\$[0-9a-zA-Z]*", TK_NUM}, // advanced match than devimal
     {"\\(", TK_LBRAKETS},
     {"\\)", TK_RBRAKETS}};
 
+static int level_token[5][2] = {
+    {TK_EQ, TK_NOTEQ},
+    {TK_ADD, TK_SUB},
+    {TK_MUL, TK_DIV},
+    {TK_DEPOINTER},
+
+};
 #define NR_REGEX ARRLEN(rules)
 
 static regex_t re[NR_REGEX] = {};
@@ -83,6 +97,7 @@ static uint32_t eval(int p, int q);
 static bool check_legalparen(int p, int q);
 static bool check_parentheses(int p, int q);
 static int found_main_op_token(int p, int q);
+static int found_specific_level_op(int p, int q, int level);
 
 static bool make_token(char *e)
 {
@@ -116,7 +131,7 @@ static bool make_token(char *e)
         case TK_NOTYPE:
           goto NEXT; // just jump out of this
                      //  tokens[nr_token].type = TK_NOTYPE; no need to record TK_NOTYPE
-        case TK_U:  // to eliminate fool generator to generate some signed calcculation.
+        case TK_U:   // to eliminate fool generator to generate some signed calcculation.
           goto NEXT;
         case TK_ADD:
           tokens[nr_token].type = TK_ADD;
@@ -127,11 +142,17 @@ static bool make_token(char *e)
         case TK_EQ:
           tokens[nr_token].type = TK_EQ;
           break;
+        case TK_NOTEQ:
+          tokens[nr_token].type = TK_NOTEQ;
+          break;
         case TK_MUL:
           tokens[nr_token].type = TK_MUL;
           break;
         case TK_DIV:
           tokens[nr_token].type = TK_DIV;
+          break;
+        case TK_AND:
+          tokens[nr_token].type = TK_AND;
           break;
         case TK_NUM:
           tokens[nr_token].type = TK_NUM;
@@ -184,6 +205,42 @@ word_t expr(char *e, bool *success)
     return 0;
   }
 
+  for (int i = 0; i < nr_token; i++)
+  {
+
+    if (tokens[i].type == TK_MUL)
+    {
+      if (i == 0)
+      {
+        tokens[i].type = TK_DEPOINTER;
+        continue;
+      }
+      switch (tokens[i - 1].type)
+      {
+      case TK_ADD:
+        tokens[i].type = TK_DEPOINTER;
+        break;
+      case TK_SUB:
+        tokens[i].type = TK_DEPOINTER;
+        break;
+      case TK_DIV:
+        tokens[i].type = TK_DEPOINTER;
+        break;
+      case TK_MUL:
+        tokens[i].type = TK_DEPOINTER;
+        break;
+      case TK_EQ:
+        tokens[i].type = TK_DEPOINTER;
+        break;
+      case TK_NOTEQ:
+        tokens[i].type = TK_DEPOINTER;
+        break;
+      default:
+        break;
+      }
+    }
+  }
+
   word_t value = eval(0, nr_token - 1);
   if (EXPR_FLAG == false)
   {
@@ -201,15 +258,21 @@ static uint32_t eval(int p, int q)
   }
   if (p == q)
   {
-    for (int i = 0; tokens[p].str[i] != '\0'; i++) // judge if it is a number one by one
+    if (tokens[p].str[0] == '$')
     {
-
-      if (!isdigit(tokens[p].str[i]))
+      bool *success = malloc(1);
+      word_t reg_val = isa_reg_str2val(tokens[p].str + 1, success);
+      if (*success == false)
       {
-        Log("Not a digit of char%c!", tokens[p].str[i]);
+        Log("Register error!");
         EXPR_FLAG = false;
         return 0;
       }
+      return reg_val;
+    }
+    if (tokens[p].str[0] == '0' && tokens[p].str[1] == 'x')
+    {
+      return strtol(tokens[p].str, NULL, 16);
     }
     return atoi(tokens[p].str);
   }
@@ -227,20 +290,34 @@ static uint32_t eval(int p, int q)
       return 0;
     }
 
+    word_t ret_val = 0;
+    if (tokens[op_pos].type == TK_DEPOINTER)
+    {
+
+      word_t to_execute = eval(op_pos + 1, q);
+      char *tmp_addr = malloc(32);
+      sprintf(tmp_addr, "0x%08x\0", to_execute);
+      word_t val = paddr_read(tmp_addr, 4);
+      return val;
+    }
     word_t val1 = eval(p, op_pos - 1);
     word_t val2 = eval(op_pos + 1, q);
     // Log("val1 and val2 are:%u,%u", val1,val2);
-    word_t ret_val=0;
+
     switch (tokens[op_pos].type)
     {
+    case TK_EQ:
+      ret_val = val1 == val2;
+    case TK_NOTEQ:
+      ret_val = val1 != val2;
     case TK_ADD:
-      ret_val =  val1 + val2;
+      ret_val = val1 + val2;
       break;
     case TK_SUB:
-      ret_val =  val1 - val2;
+      ret_val = val1 - val2;
       break;
     case TK_MUL:
-      ret_val =  val1 * val2;
+      ret_val = val1 * val2;
       break;
     case TK_DIV:
       if (val2 == 0)
@@ -249,23 +326,34 @@ static uint32_t eval(int p, int q)
         EXPR_FLAG = false;
         return 0;
       }
-      ret_val =  val1 / val2;
+      ret_val = val1 / val2;
       break;
     default:
       Assert(0, "????\n");
     }
 
-    
     return ret_val;
   }
-  
 }
 
 static int found_main_op_token(int p, int q)
 {
-  int ri_paren_count = 0;
-  bool ADD_SUB_FOUND_FLAG = false;
+  int op_pos = -1;
+  for (int i = 0; i < 4; i++)
+  {
+    op_pos = found_specific_level_op(p, q, i);
+    if (op_pos >= 0)
+      return op_pos;
+  }
+  return -1;
+}
+
+static int found_specific_level_op(int p, int q, int level)
+{
   int op_pos;
+  int ri_paren_count = 0;
+
+  int cur_level_op_num = sizeof(level_token[level]) / sizeof(level_token[level][0]);
   for (op_pos = q; op_pos >= p; op_pos--)
   {
     if (!strcmp(tokens[op_pos].str, ")"))
@@ -276,42 +364,19 @@ static int found_main_op_token(int p, int q)
     {
       ri_paren_count--;
     }
-    if (tokens[op_pos].type == TK_ADD || tokens[op_pos].type == TK_SUB)
-    {
-      if (ri_paren_count == 0)
-      {
-        ADD_SUB_FOUND_FLAG = true;
-        break;
-      }
-    }
-  }
 
-  if (ADD_SUB_FOUND_FLAG == false)
-  {
-    for (op_pos = q; op_pos >= p; op_pos--)
+    for (int i = 0; i < cur_level_op_num; i++)
     {
-      if (!strcmp(tokens[op_pos].str, ")"))
-      {
-        ri_paren_count++;
-      }
-      if (!strcmp(tokens[op_pos].str, "("))
-      {
-        ri_paren_count--;
-      }
-      if (tokens[op_pos].type == TK_MUL || tokens[op_pos].type == TK_DIV)
+      if (tokens[op_pos].type == level_token[level][i])
       {
         if (ri_paren_count == 0)
         {
-          break;
+          return op_pos;
         }
       }
     }
   }
-  if (op_pos < p)
-  {
-    return -1;
-  }
-  return op_pos;
+  return -1;
 }
 
 static bool check_parentheses(int p, int q)
