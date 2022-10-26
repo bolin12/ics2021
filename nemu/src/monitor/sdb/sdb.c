@@ -13,8 +13,7 @@ static int cmd_x(char *args);
 static int cmd_p(char *args);
 static int cmd_w(char *args);
 static int cmd_d(char *args);
-void init_regex();
-void init_wp_pool();
+
 
 /* We use the `readline' library to provide more flexibility to read from stdin. */
 static char *rl_gets()
