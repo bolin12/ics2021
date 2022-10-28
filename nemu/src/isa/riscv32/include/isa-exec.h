@@ -2,3 +2,6 @@
 #include "../instr/ldst.h"
 #include "../instr/special.h"
 #include "../instr/jal.h"
+#include "../instr/op-imm.h"
+#include "../instr/op.h"
+#include "../instr/branch.h"

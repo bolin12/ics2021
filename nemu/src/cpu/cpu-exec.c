@@ -1,6 +1,7 @@
 #include <cpu/cpu.h>
 #include <cpu/exec.h>
 #include <cpu/difftest.h>
+#include <cpu/ifetch.h>
 #include <isa-all-instr.h>
 #include <locale.h>
 
@@ -32,9 +33,9 @@ static void trace_and_difftest(Decode *_this, vaddr_t dnpc)
     IFDEF(CONFIG_ITRACE, puts(_this->logbuf));
   }
   IFDEF(CONFIG_DIFFTEST, difftest_step(_this->pc, dnpc));
-#ifdef CONFIG_WATCHPOINT
-  if(scan_wp())nemu_state.state = NEMU_STOP;
-#endif
+// #ifdef CONFIG_WATCHPOINT
+//   if(scan_wp())nemu_state.state = NEMU_STOP;
+// #endif
 }
 
 #include <isa-exec.h>
@@ -121,6 +122,10 @@ void cpu_exec(uint64_t n)
     fetch_decode_exec_updatepc(&s);
     g_nr_guest_instr++;
     trace_and_difftest(&s, cpu.pc);
+    printf("current pc is %08x, instr is %08x\n", s.pc,vaddr_ifetch(s.pc, 4));
+    isa_reg_display();
+    printf("pc next dnpc is : %x\n\n", s.dnpc);
+
     if (nemu_state.state != NEMU_RUNNING)
       break;
     IFDEF(CONFIG_DEVICE, device_update());
