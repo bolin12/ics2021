@@ -122,9 +122,9 @@ void cpu_exec(uint64_t n)
     fetch_decode_exec_updatepc(&s);
     g_nr_guest_instr++;
     trace_and_difftest(&s, cpu.pc);
-    printf("current pc is %08x, instr is %08x\n", s.pc,vaddr_ifetch(s.pc, 4));
-    isa_reg_display();
-    printf("pc next dnpc is : %x\n\n", s.dnpc);
+    // printf("current pc is %08x, instr is %08x\n", s.pc,vaddr_ifetch(s.pc, 4));
+    // isa_reg_display();
+    // printf("pc next dnpc is : %x\n\n", s.dnpc);
 
     if (nemu_state.state != NEMU_RUNNING)
       break;
