@@ -1,4 +1,4 @@
-#include "../instr/compute.h"
+#include "../instr/luiauipc.h"
 #include "../instr/ldst.h"
 #include "../instr/special.h"
 #include "../instr/jal.h"

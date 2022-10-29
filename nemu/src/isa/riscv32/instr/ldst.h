@@ -2,7 +2,13 @@ def_EHelper(lw) {
   rtl_lm(s, ddest, dsrc1, id_src2->imm, 4);
 }
 def_EHelper(lh){
+  rtl_lms(s, ddest, dsrc1, id_src2->imm, 2);
+  // rtl_lm(s, ddest, dsrc1, id_src2->imm, 2);
+}
+def_EHelper(lhu){
+  printf("lh offset is %d\n", id_src2->imm);
   rtl_lm(s, ddest, dsrc1, id_src2->imm, 2);
+  // rtl_lm(s, ddest, dsrc1, id_src2->imm, 2);
 }
 def_EHelper(lbu){
   rtl_lm(s, ddest, dsrc1, id_src2->imm, 1);
